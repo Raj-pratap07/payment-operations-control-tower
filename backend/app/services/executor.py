@@ -54,7 +54,7 @@ class ActionExecutor:
         execution_id = f"action-proposal:{proposal_id}"
         existing = self._repository.get_execution(db, execution_id)
         if existing is not None:
-            verification = self._verify_existing(db, existing)
+            verification = self._verifier.verify_execution(db, execution_id)
             return ExecutionResult(existing.status == "EXECUTED" and verification.passed, existing, verification, "Existing execution returned.")
 
         proposal = self._repository.get_proposal(db, proposal_id)
@@ -119,17 +119,8 @@ class ActionExecutor:
             proposal.status = ActionProposalStatus.EXECUTED
             db.flush()
             self._persist_audit(db, "EXECUTION_COMPLETED", proposal, reason="Controlled internal execution completed.")
-            verification = self._verifier.verify(execution, incident)
-            execution.verified_at = datetime.now(UTC)
-            if verification.passed:
-                incident.status = IncidentStatus.RESOLVED
-                incident.resolved_at = datetime.now(UTC)
-                self._persist_audit(db, "VERIFICATION_PASSED", proposal, reason=verification.reason)
-                self._persist_audit(db, "INCIDENT_RESOLVED", proposal, reason="Execution was verified successfully.")
-            else:
-                incident.status = IncidentStatus.ACTION_REQUIRED
-                self._persist_audit(db, "VERIFICATION_FAILED", proposal, reason=verification.reason)
-                self._persist_audit(db, "INCIDENT_REOPENED", proposal, reason="Verified execution did not produce expected state.")
+            verification = self._verifier.verify_execution(db, execution_id)
+            if not verification.passed:
                 return ExecutionResult(False, execution, verification, verification.reason)
         return ExecutionResult(True, execution, verification, verification.reason)
 

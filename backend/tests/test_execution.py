@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.agents.provider import NoProvider
 from app.core.enums import ActionProposalStatus, ApprovalStatus, IncidentSeverity, IncidentStatus, IncidentType
 from app.database.database import engine
-from app.models import ActionExecution, ActionProposal, Approval, AuditEvent, Incident, IncidentEvidence, Policy
+from app.models import ActionExecution, ActionProposal, Approval, AuditEvent, Incident, IncidentEvidence, Payment, Policy, Settlement
 from app.policies.engine import PolicyOutcome
 from app.services.action_planning import ApprovalService
 from app.services.execution_adapter import AdapterExecutionError, AdapterResult, InProcessActionAdapter
@@ -40,8 +40,15 @@ def setup_proposal(db: Session, *, requires_approval: bool = False, status: Inci
     db.flush()
     db.add(IncidentEvidence(
         incident_id=incident.id, evidence_type="financial", entity_type="Settlement",
-        entity_id=f"setl-{uuid4()}", relationship="supports",
+        entity_id="SETTLEMENT_PLACEHOLDER", relationship="supports",
     ))
+    settlement = Settlement(
+        provider_settlement_id="SETTLEMENT_PLACEHOLDER", amount=1000, currency="INR", fees=0,
+        tax=0, status="PROCESSED",
+    )
+    payment = Payment(
+        provider_payment_id=f"payment-{uuid4()}", amount=1000, currency="INR", status="CAPTURED",
+    )
     policy = Policy(
         name=f"Execution policy {uuid4()}", action_type="FLAG_FOR_REVIEW", max_amount=10000,
         min_confidence=Decimal("0.9000"), requires_approval=requires_approval, is_active=True,
@@ -51,13 +58,20 @@ def setup_proposal(db: Session, *, requires_approval: bool = False, status: Inci
         amount=1000, currency="INR", confidence=Decimal("0.9500"), requires_approval=False,
         status=ActionProposalStatus.PROPOSED, created_by="test",
     )
-    db.add_all((policy, proposal))
+    db.add_all((policy, proposal, settlement, payment))
+    db.flush()
+    db_session_evidence = db.scalar(select(IncidentEvidence).where(IncidentEvidence.incident_id == incident.id))
+    assert db_session_evidence is not None
+    db_session_evidence.entity_id = str(settlement.id)
     db.flush()
     return incident, proposal
 
 
 def audit_actions(db: Session, proposal: ActionProposal) -> set[str]:
-    return set(db.scalars(select(AuditEvent.action_type).where(AuditEvent.entity_id == str(proposal.id))))
+    return set(db.scalars(select(AuditEvent.action_type).where(
+        (AuditEvent.entity_id == str(proposal.id))
+        | (AuditEvent.metadata_["action_proposal_id"].astext == str(proposal.id))
+    )))
 
 
 def test_authorized_execution_verifies_and_resolves_incident(db_session: Session) -> None:
