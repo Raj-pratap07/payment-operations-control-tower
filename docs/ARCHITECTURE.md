@@ -6,6 +6,8 @@ Working product name: AI Payment Operations Control Tower
 
 Core thesis: Observe → Correlate → Detect → Investigate → Quantify → Decide → Act → Verify → Audit
 
+V1 database scope is single-merchant for the hackathon MVP. Merchant and multi-tenancy are post-MVP extensions; `docs/DOMAIN_MODEL.md` is the authoritative V1 database contract.
+
 1. Product Purpose
 
 The AI Payment Operations Control Tower is a Razorpay-first operational control system for payment-heavy digital businesses. It continuously consumes payment and financial events, reconstructs payment journeys, detects inconsistent, delayed, incomplete, or financially important states, investigates incidents using structured evidence, quantifies financial impact, recommends remediation, and executes only policy-approved actions.
