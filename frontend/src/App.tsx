@@ -1,122 +1,18 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { useEffect, useState } from 'react'
+import { Activity, ArrowLeft, Check, ChevronRight, ClipboardList, LayoutDashboard, Menu, RefreshCw, Search, ShieldAlert, Sparkles, WalletCards, X } from 'lucide-react'
+import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+import { api, type Action, type AuditEvent, type Dashboard, type Evidence, type Incident, type IncidentSummary, type Investigation, type Payment, type PaymentJourney } from './api'
+import { ActionCard, AuditTimeline, EmptyState, ErrorState, EvidenceCard, IncidentRow, InvestigationPanel, LoadingState, MetricCard, PaymentJourney as PaymentJourneyView, SeverityBadge, StatusBadge, WorkflowRail, formatDate, formatMoney, titleCase } from './components'
 import './App.css'
 
-function App() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
-}
-
+function useLoad<T>(loader: () => Promise<T>, deps: string[] = []) { const [state, setState] = useState<{ data: T | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null }); const reload = () => { setState({ data: null, loading: true, error: null }); loader().then((data) => setState({ data, loading: false, error: null })).catch((error: unknown) => setState({ data: null, loading: false, error: error instanceof Error ? error.message : 'Unable to reach the control tower.' })) }; useEffect(reload, deps); return { ...state, reload } }
+function Shell({ children }: { children: React.ReactNode }) { const [open, setOpen] = useState(false); return <div className="app-shell"><aside className={open ? 'sidebar open' : 'sidebar'}><div className="brand"><div className="brand-mark"><Activity size={19} /></div><div><strong>CONTROL TOWER</strong><span>PAYMENT OPERATIONS</span></div><button className="mobile-close" onClick={() => setOpen(false)} aria-label="Close menu"><X size={20} /></button></div><nav><Link to="/"><LayoutDashboard size={17} />Command center</Link><Link to="/incidents"><ShieldAlert size={17} />Incidents</Link><Link to="/actions"><ClipboardList size={17} />Action center</Link></nav><div className="sidebar-footer"><div className="live-indicator"><span />SYSTEM OPERATIONAL</div><span>Razorpay environment · V1</span></div></aside><main className="main"><header className="topbar"><button className="mobile-menu" onClick={() => setOpen(true)} aria-label="Open menu"><Menu size={21} /></button><div className="crumb">OPERATIONS / <strong>LIVE VIEW</strong></div><div className="topbar-actions"><span className="topbar-time">04 SEP 2026 · 14:32 IST</span><button className="icon-button" title="Search"><Search size={18} /></button><div className="avatar">OP</div></div></header>{children}</main></div> }
+function PageHeader({ eyebrow, title, detail, action }: { eyebrow: string; title: string; detail?: string; action?: React.ReactNode }) { return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1>{detail && <p>{detail}</p>}</div>{action}</div> }
+function DashboardPage() { const { data, loading, error, reload } = useLoad<Dashboard>(api.dashboard); if (loading) return <Shell><LoadingState /></Shell>; if (error || !data) return <Shell><ErrorState message={error ?? 'Dashboard unavailable'} /></Shell>; return <Shell><div className="page"><PageHeader eyebrow="COMMAND CENTER / 01" title="Good afternoon, operator" detail="A live read on payment health, financial exposure, and decisions waiting for human attention." action={<button className="button ghost" onClick={reload}><RefreshCw size={16} />Refresh</button>} /><WorkflowRail active="OBSERVE" /><div className="metrics-grid"><MetricCard label="Payment health" value={`${data.payment_health.CAPTURED ?? 0} captured`} note={`${data.payment_health.FAILED ?? 0} failed · ${data.payment_health.AUTHORIZED ?? 0} authorized`} tone="success" /><MetricCard label="Open incidents" value={data.open_incident_count} note="requiring operational attention" tone="danger" /><MetricCard label="Critical incidents" value={data.critical_incident_count} note="highest urgency" tone="danger" /><MetricCard label="Financial exposure" value={formatMoney(data.financial_exposure)} note="open incident exposure" tone="accent" /><MetricCard label="Unexplained money" value={formatMoney(data.unexplained_money)} note="derived from open exposure" /><MetricCard label="Approval queue" value={data.approval_required_action_count} note={`${data.auto_approvable_action_count} auto-approvable`} /></div><div className="dashboard-grid"><section className="section-block"><div className="section-heading"><div><span className="eyebrow">URGENT QUEUE</span><h2>Recent critical incidents</h2></div><Link className="text-link" to="/incidents">View all <ArrowLeft size={15} className="flip" /></Link></div>{data.recent_critical_incidents.length ? data.recent_critical_incidents.map((incident) => <IncidentRow incident={incident} onClick={() => window.location.assign(`/incidents/${incident.id}`)} key={incident.id} />) : <EmptyState label="No critical incidents in the current window." />}</section><section className="section-block signal-card"><div className="section-heading"><div><span className="eyebrow">DECISION PIPELINE</span><h2>What needs action</h2></div><WalletCards size={20} /></div><div className="pipeline-row"><span className="pipeline-number orange">{data.approval_required_action_count}</span><div><strong>Approval required</strong><p>Human authorization is blocking execution.</p></div></div><div className="pipeline-row"><span className="pipeline-number mint">{data.auto_approvable_action_count}</span><div><strong>Auto-approvable</strong><p>Policy conditions are ready for evaluation.</p></div></div><Link className="button primary full" to="/actions">Open action center <ArrowLeft size={16} className="flip" /></Link></section></div></div></Shell> }
+function IncidentsPage() { const [filter, setFilter] = useState('ALL'); const { data, loading, error } = useLoad<IncidentSummary[]>(() => api.incidents(filter === 'ALL' ? undefined : { severity: filter }), [filter]); return <Shell><div className="page"><PageHeader eyebrow="DETECT / 02" title="Incidents" detail="Deterministic controls surface the exceptions that need an operator." /><div className="filter-bar"><div className="segmented">{['ALL', 'CRITICAL', 'HIGH', 'MEDIUM'].map((item) => <button className={filter === item ? 'selected' : ''} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div><span className="result-count">{data?.length ?? 0} incidents</span></div>{loading ? <LoadingState label="Retrieving incident register" /> : error ? <ErrorState message={error} /> : data?.length ? <section className="table-wrap"><div className="table-head"><span>Incident</span><span>Type</span><span>Severity</span><span>Status</span><span>Exposure</span><span /></div>{data.map((incident) => <IncidentRow incident={incident} onClick={() => window.location.assign(`/incidents/${incident.id}`)} key={incident.id} />)}</section> : <EmptyState label="No incidents match this filter." />}</div></Shell> }
+function IncidentDetailPage() { const { id = '' } = useParams(); const navigate = useNavigate(); const incidentState = useLoad<Incident>(() => api.incident(id), [id]); const evidenceState = useLoad<Evidence[]>(() => api.evidence(id), [id]); const [investigation, setInvestigation] = useState<Investigation | null>(null); const [investigating, setInvestigating] = useState(false); const [investigationError, setInvestigationError] = useState<string | null>(null); const [actions, setActions] = useState<Action[]>([]); useEffect(() => { api.actions().then((items) => setActions(items.filter((item) => item.incident_id === id))).catch(() => setActions([])) }, [id]); if (incidentState.loading) return <Shell><LoadingState /></Shell>; if (incidentState.error || !incidentState.data) return <Shell><ErrorState message={incidentState.error ?? 'Incident unavailable'} /></Shell>; const incident = incidentState.data; const runInvestigation = () => { setInvestigating(true); setInvestigationError(null); api.investigate(id).then(setInvestigation).catch((error: unknown) => setInvestigationError(error instanceof Error ? error.message : 'Investigation failed.')).finally(() => setInvestigating(false)) }; return <Shell><div className="page detail-page"><button className="back-link" onClick={() => navigate('/incidents')}><ArrowLeft size={16} />Back to incidents</button><PageHeader eyebrow={`INCIDENT / ${incident.incident_code}`} title={incident.title} detail={incident.description ?? 'No description recorded.'} action={<div className="header-badges"><SeverityBadge value={incident.severity} /><StatusBadge value={incident.status} /></div>} /><WorkflowRail active={investigation ? 'DECIDE' : 'INVESTIGATE'} /><div className="detail-metrics"><MetricCard label="Financial exposure" value={formatMoney(incident.financial_exposure, incident.currency ?? 'INR')} tone="danger" /><MetricCard label="Detected" value={formatDate(incident.detected_at)} /><MetricCard label="Evidence records" value={incident.evidence_count} /><MetricCard label="Resolved" value={formatDate(incident.resolved_at)} /></div><div className="detail-grid"><div className="detail-main"><section className="section-block"><div className="section-heading"><div><span className="eyebrow">TRACEABLE RECORDS</span><h2>Evidence</h2></div><span className="section-count">{evidenceState.data?.length ?? 0} linked records</span></div>{evidenceState.loading ? <LoadingState /> : evidenceState.error ? <ErrorState message={evidenceState.error} /> : evidenceState.data?.length ? evidenceState.data.map((item) => <EvidenceCard evidence={item} key={item.id} />) : <EmptyState label="No evidence records linked." />}</section><section className="section-block"><div className="section-heading"><div><span className="eyebrow">INVESTIGATE / 03</span><h2>Investigation</h2></div>{!investigation && <button className="button primary" onClick={runInvestigation} disabled={investigating}><Sparkles size={16} />{investigating ? 'Investigating…' : 'Investigate incident'}</button>}</div>{investigationError && <ErrorState message={investigationError} />}{investigating && <LoadingState label="Retrieving evidence and structuring findings" />}{investigation && <InvestigationPanel result={investigation} />}{!investigation && !investigating && !investigationError && <div className="investigation-empty"><Sparkles size={27} /><p>Run the investigator to turn linked evidence into a structured explanation.</p></div>}</section></div><aside className="detail-side"><section className="section-block workflow-card"><div className="section-heading"><div><span className="eyebrow">CONTROL PATH</span><h2>Decision trail</h2></div></div>{['Incident', 'Evidence', 'Investigation', 'Action', 'Policy', 'Execution', 'Verification'].map((step, index) => <div className={`trail-step ${index < (investigation ? 4 : 2) ? 'done' : ''}`} key={step}><span>{index < (investigation ? 4 : 2) ? <Check size={14} /> : index + 1}</span>{step}{index < 6 && <ChevronRight size={14} />}</div>)}</section><section className="section-block"><div className="section-heading"><div><span className="eyebrow">PROPOSALS</span><h2>Recommended action</h2></div></div>{actions.length ? actions.map((action) => <ActionCard action={action} key={action.id} />) : <EmptyState label="No action proposal attached." />}</section><section className="section-block"><div className="section-heading"><div><span className="eyebrow">AUDIT / 08</span><h2>Audit trail</h2></div></div><AuditFor entityId={id} entityType="Incident" /></section></aside></div></div></Shell> }
+function AuditFor({ entityType, entityId }: { entityType: string; entityId: string }) { const { data, loading, error } = useLoad<AuditEvent[]>(() => api.audit(entityType, entityId), [entityType, entityId]); if (loading) return <LoadingState />; if (error) return <ErrorState message={error} />; return data?.length ? <AuditTimeline events={data} /> : <EmptyState label="No audit events recorded." /> }
+function ActionsPage() { const { data, loading, error, reload } = useLoad<Action[]>(api.actions); const decide = (action: Action, approve: boolean) => { const actor = 'operator-demo'; const operation = approve ? api.approve(action.id, actor) : api.reject(action.id, actor, 'Operator rejected proposal.'); operation.then(reload).catch(() => undefined) }; return <Shell><div className="page"><PageHeader eyebrow="DECIDE / 04" title="Action center" detail="Recommendations are proposals. Policy decides what can move forward." /><div className="action-banner"><ShieldAlert size={20} /><div><strong>Policy before execution</strong><span>Every action below is evaluated by the deterministic backend policy engine.</span></div></div>{loading ? <LoadingState /> : error ? <ErrorState message={error} /> : data?.length ? <div className="action-grid">{data.map((action) => <ActionCard action={action} onApprove={() => decide(action, true)} onReject={() => decide(action, false)} key={action.id} />)}</div> : <EmptyState label="No action proposals are waiting." />}</div></Shell> }
+function PaymentPage() { const { id = '' } = useParams(); const payment = useLoad<Payment>(() => api.payment(id), [id]); const journey = useLoad<PaymentJourney>(() => api.journey(id), [id]); if (payment.loading || journey.loading) return <Shell><LoadingState /></Shell>; if (payment.error || journey.error || !payment.data || !journey.data) return <Shell><ErrorState message={payment.error ?? journey.error ?? 'Payment unavailable'} /></Shell>; return <Shell><div className="page"><button className="back-link" onClick={() => window.history.back()}><ArrowLeft size={16} />Back</button><PageHeader eyebrow="PAYMENT JOURNEY / 05" title={payment.data.provider_payment_id} detail={`${payment.data.provider_order_id ?? 'No order reference'} · ${payment.data.currency}`} action={<StatusBadge value={payment.data.status} />} /><div className="detail-metrics"><MetricCard label="Amount" value={formatMoney(payment.data.amount, payment.data.currency)} tone="accent" /><MetricCard label="Current state" value={titleCase(payment.data.status)} /><MetricCard label="Created" value={formatDate(payment.data.created_at)} /><MetricCard label="Last updated" value={formatDate(payment.data.updated_at)} /></div><div className="journey-layout"><section className="section-block"><div className="section-heading"><div><span className="eyebrow">EVENT HISTORY</span><h2>Payment lifecycle</h2></div></div><PaymentJourneyView transitions={journey.data.transitions} /></section><section className="section-block payment-note"><WalletCards size={22} /><h3>Projection, not reconstruction</h3><p>This timeline is the immutable state transition history linked to financial events.</p></section></div></div></Shell> }
+function App() { return <Routes><Route path="/" element={<DashboardPage />} /><Route path="/incidents" element={<IncidentsPage />} /><Route path="/incidents/:id" element={<IncidentDetailPage />} /><Route path="/payments/:id" element={<PaymentPage />} /><Route path="/actions" element={<ActionsPage />} /></Routes> }
 export default App

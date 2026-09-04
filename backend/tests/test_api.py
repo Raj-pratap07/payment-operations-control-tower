@@ -72,6 +72,21 @@ def test_dashboard_and_incident_endpoints(client: TestClient, api_records: dict[
     assert evidence.json()[0]["entity_id"] == str(api_records["payment"].id)
 
 
+def test_dashboard_cors_preflight_and_get(client: TestClient, api_records: dict[str, object]) -> None:
+    preflight = client.options(
+        "/dashboard/summary",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert "GET" in preflight.headers["access-control-allow-methods"]
+    assert client.get("/dashboard/summary").status_code == 200
+
+
 def test_payment_and_journey_endpoints(client: TestClient, api_records: dict[str, object]) -> None:
     payment = api_records["payment"]
     assert client.get(f"/payments/{payment.id}").json()["provider_payment_id"] == payment.provider_payment_id
