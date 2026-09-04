@@ -145,3 +145,24 @@ class InvestigationResponse(APIModel):
     recommended_action: str
     confidence: float
     uncertainties: list[str]
+
+
+class CreateActionProposalRequest(BaseModel):
+    action_type: str | None = Field(default=None, min_length=1, max_length=100, description="Optional action type override. If omitted, inferred from investigation.")
+
+
+class ActionProposalResponse(APIModel):
+    id: UUID
+    incident_id: UUID
+    action_type: str
+    description: str
+    amount: int | None
+    currency: str | None
+    confidence: float | None
+    requires_approval: bool
+    status: ActionProposalStatus
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    policy_decision: PolicyDecisionResponse
+    approval_id: UUID | None = None

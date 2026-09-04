@@ -241,6 +241,17 @@ def test_investigation_schema_rejects_extra_fields() -> None:
         InvestigationOutput.model_validate({"unexpected": True})
 
 
+def test_investigation_prompt_and_schema_keep_minor_units_explicit() -> None:
+    from app.agents.prompts import INVESTIGATOR_SYSTEM_PROMPT
+
+    assert "integer minor" in INVESTIGATOR_SYSTEM_PROMPT
+    assert "paise" in INVESTIGATOR_SYSTEM_PROMPT
+    assert "₹5,00,000" in INVESTIGATOR_SYSTEM_PROMPT
+    result = InvestigationOutput.model_validate(valid_output(uuid4(), str(uuid4())))
+    assert isinstance(result.financial_impact_minor, int)
+    assert isinstance(result.unresolved_amount_minor, int)
+
+
 def test_ai_surface_has_no_mutation_or_execution_tools() -> None:
     names = InvestigationToolLayer.TOOL_NAMES
     assert not any("update" in name or "delete" in name or "execute" in name or "refund" == name for name in names)

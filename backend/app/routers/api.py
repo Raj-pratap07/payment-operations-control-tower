@@ -13,7 +13,7 @@ from app.repositories.action_policy import ActionPolicyRepository
 from app.repositories.api import APIRepository
 from app.repositories.incidents import ControlStateRepository
 from app.repositories.projections import PaymentRepository
-from app.schemas.api import ActionResponse, ActorRequest, ApprovalResponse, DashboardSummary, EvidenceResponse, IncidentResponse, IncidentSummary, InvestigationResponse, PaymentJourneyResponse, PaymentResponse, PaymentTransitionResponse, RejectionRequest
+from app.schemas.api import ActionProposalResponse, ActionResponse, ActorRequest, ApprovalResponse, CreateActionProposalRequest, DashboardSummary, EvidenceResponse, IncidentResponse, IncidentSummary, InvestigationResponse, PaymentJourneyResponse, PaymentResponse, PaymentTransitionResponse, RejectionRequest
 from app.services.action_planning import ApprovalService
 from app.services.investigator import InvestigationService
 
@@ -103,6 +103,53 @@ def investigate(incident_id: UUID, db: Session = Depends(get_db)) -> Investigati
     if api_repository.incident(db, incident_id) is None:
         raise _not_found("Incident was not found.")
     return InvestigationResponse.model_validate(InvestigationService().investigate(db, incident_id))
+
+
+@router.post("/investigations/{incident_id}/action", response_model=ActionProposalResponse, status_code=status.HTTP_201_CREATED)
+def create_action_from_investigation(incident_id: UUID, request: CreateActionProposalRequest, db: Session = Depends(get_db)) -> ActionProposalResponse:
+    from app.services.investigation_action_planning import InvestigationActionError, InvestigationActionService
+
+    if api_repository.incident(db, incident_id) is None:
+        raise _not_found("Incident was not found.")
+
+    investigation = InvestigationService().investigate(db, incident_id)
+    service = InvestigationActionService()
+
+    try:
+        result = service.create_proposal_from_investigation(
+            db,
+            investigation,
+            action_type=request.action_type,
+        )
+        db.commit()
+    except InvestigationActionError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    except ValueError as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+
+    return ActionProposalResponse(
+        id=result.proposal.id,
+        incident_id=result.proposal.incident_id,
+        action_type=result.proposal.action_type,
+        description=result.proposal.description,
+        amount=result.proposal.amount,
+        currency=result.proposal.currency,
+        confidence=float(result.proposal.confidence) if result.proposal.confidence is not None else None,
+        requires_approval=result.proposal.requires_approval,
+        status=result.proposal.status,
+        created_by=result.proposal.created_by,
+        created_at=result.proposal.created_at,
+        updated_at=result.proposal.updated_at,
+        policy_decision=PolicyDecisionResponse(
+            outcome=result.policy_decision.outcome,
+            reason=result.policy_decision.reason,
+            policy_id=result.policy_decision.policy_id,
+            evaluated_conditions=result.policy_decision.evaluated_conditions,
+        ),
+        approval_id=result.approval_id,
+    )
 
 
 @router.get("/actions", response_model=list[ActionResponse])

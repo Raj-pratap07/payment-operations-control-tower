@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.agents.provider import LLMProvider, NoProvider, ProviderResponse
+from app.agents.provider import LLMProvider, ProviderResponse, configured_provider
 from app.agents.prompts import INVESTIGATOR_SYSTEM_PROMPT
 from app.schemas.investigation import InvestigationEvidence, InvestigationOutput
 from app.services.investigation_tools import InvestigationToolLayer, ToolError
@@ -33,7 +33,7 @@ class InvestigationService:
     ) -> None:
         if max_tool_calls < 0:
             raise ValueError("max_tool_calls must be non-negative.")
-        self._provider = provider or NoProvider()
+        self._provider = provider or configured_provider()
         self._max_tool_calls = max_tool_calls
         self._tools_factory = tools_factory
 
@@ -71,7 +71,7 @@ class InvestigationService:
                 except (ToolError, TypeError, ValueError) as error:
                     return self._incomplete(incident_id, f"Investigation tool failed: {error}", known_ids)
                 known_ids |= _record_ids(result)
-                messages.append({"role": "tool", "name": call.name, "content": result})
+                messages.append({"role": "tool", "name": call.name, "call_id": call.call_id, "content": result})
                 calls_used += 1
         if last_response is None or last_response.content is None:
             return self._incomplete(incident_id, "No structured investigation response was produced.", known_ids)

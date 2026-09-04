@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     RAZORPAY_WEBHOOK_SECRET: str = Field(default="")
 
     LLM_API_KEY: str = Field(default="")
+    AI_PROVIDER: str = Field(default="gemini")
+    GEMINI_API_KEY: str = Field(default="")
+    GEMINI_MODEL: str = Field(default="gemini-3.6-flash")
+    OPENROUTER_API_KEY: str = Field(default="")
+    OPENROUTER_MODEL: str = Field(default="openai/gpt-oss-120b:free")
 
 
 @lru_cache

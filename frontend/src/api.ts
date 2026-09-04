@@ -33,6 +33,7 @@ export const api = {
   incident: (id: string) => request<Incident>(`/incidents/${id}`),
   evidence: (id: string) => request<Evidence[]>(`/incidents/${id}/evidence`),
   investigate: (id: string) => request<Investigation>(`/investigations/${id}`, { method: 'POST' }),
+  createActionFromInvestigation: (id: string, actionType?: string) => request<{ id: string; incident_id: string; action_type: string; description: string; amount: number | null; currency: string | null; confidence: number | null; requires_approval: boolean; status: string; created_by: string; created_at: string; updated_at: string; policy_decision: PolicyDecision; approval_id: string | null }>(`/investigations/${id}/action`, { method: 'POST', body: JSON.stringify({ action_type: actionType ?? null }) }),
   payment: (id: string) => request<Payment>(`/payments/${id}`),
   journey: (id: string) => request<PaymentJourney>(`/payments/${id}/journey`),
   actions: () => request<Action[]>('/actions'),
