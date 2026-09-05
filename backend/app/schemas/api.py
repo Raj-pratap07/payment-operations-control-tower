@@ -113,6 +113,20 @@ class ActionResponse(APIModel):
     executions: list[ExecutionResponse] = Field(default_factory=list)
 
 
+class VerificationResultResponse(APIModel):
+    outcome: str
+    passed: bool
+    reason: str
+
+
+class ExecutionActionResult(APIModel):
+    success: bool
+    reason: str
+    execution: ExecutionResponse | None = None
+    verification: VerificationResultResponse | None = None
+    action: ActionResponse | None = None
+
+
 class ActorRequest(BaseModel):
     actor_id: str = Field(min_length=1, max_length=255)
 

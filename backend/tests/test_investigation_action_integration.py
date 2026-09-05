@@ -272,3 +272,97 @@ def test_missing_investigation_rejected(db_session: Session) -> None:
     service = InvestigationActionService()
     with pytest.raises(MissingInvestigationError):
         service.create_proposal_from_investigation(None, None)  # type: ignore[arg-type]
+
+
+def test_fallback_investigation_creates_demo_reconcile_proposal(db_session: Session) -> None:
+    """A fallback investigation for the demo settlement incident becomes a
+    RECONCILE_ADJUSTMENT / ₹28,000 proposal that requires approval and stays PENDING.
+
+    Mirrors the live demo environment: incident.financial_exposure records the
+    ABSOLUTE discrepancy (expected − observed), the IncidentEvidence relationship
+    is 'observed_amount', and the policy mandates approval above ₹10,000.
+    """
+    from typing import Any
+
+    from app.agents.provider import ProviderResponse
+    from app.models import Approval, BankTransaction, Settlement
+    from app.services.investigator import InvestigationService
+
+    class _MalformedProvider:
+        def complete(self, *, system_prompt: str, messages: list[dict[str, Any]], tools: list[str]) -> ProviderResponse:
+            return ProviderResponse(content="not valid JSON")
+
+    expected_amount = 50_000_000  # ₹5,00,000
+    observed_amount = 47_200_000  # ₹4,72,000
+    difference = expected_amount - observed_amount  # 2,800,000 → ₹28,000
+
+    settlement = Settlement(
+        provider_settlement_id=f"DEMO_SETTLE_{uuid4()}",
+        amount=observed_amount,
+        currency="INR",
+        fees=0,
+        tax=0,
+        status="PROCESSED",
+    )
+    db_session.add(settlement)
+    db_session.flush()
+
+    incident = Incident(
+        incident_code=f"SETTLEMENT_DISCREPANCY:{settlement.id}",
+        incident_type=IncidentType.SETTLEMENT_DISCREPANCY,
+        severity=IncidentSeverity.HIGH,
+        status=IncidentStatus.OPEN,
+        title=f"Settlement discrepancy for {settlement.provider_settlement_id}",
+        description=f"Expected {expected_amount} minor units but observed {settlement.amount}.",
+        financial_exposure=difference,
+        currency="INR",
+        detected_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    db_session.add(incident)
+    db_session.flush()
+
+    db_session.add(IncidentEvidence(
+        incident_id=incident.id,
+        evidence_type="financial",
+        entity_type="Settlement",
+        entity_id=str(settlement.id),
+        relationship="observed_amount",
+    ))
+    db_session.add(BankTransaction(
+        external_transaction_id=f"DEMO_BANK_{uuid4()}",
+        transaction_type="CREDIT",
+        amount=observed_amount,
+        currency="INR",
+        transaction_at=datetime(2026, 1, 1, tzinfo=UTC),
+        source="DEMO_SIMULATOR",
+    ))
+    db_session.add(Policy(
+        name=f"DEMO_RECONCILE_{uuid4()}",
+        description="Deterministic demo policy for settlement reconciliation proposals.",
+        action_type="RECONCILE_ADJUSTMENT",
+        max_amount=10_000,
+        min_confidence=Decimal("0.90"),
+        requires_approval=True,
+        is_active=True,
+    ))
+    db_session.flush()
+
+    investigation = InvestigationService(provider=_MalformedProvider(), use_fallback=True).investigate(
+        db_session, incident.id
+    )
+    assert investigation.financial_impact_minor == difference
+    assert investigation.unresolved_amount_minor == difference
+
+    service = InvestigationActionService()
+    result = service.create_proposal_from_investigation(db_session, investigation)
+
+    assert result.proposal.action_type == "RECONCILE_ADJUSTMENT"
+    assert result.proposal.amount == difference
+    assert result.proposal.currency == "INR"
+    assert result.proposal.status == ActionProposalStatus.PROPOSED
+    assert result.policy_decision.outcome == PolicyOutcome.REQUIRE_APPROVAL
+    assert result.proposal.requires_approval is True
+    assert result.approval_id is not None
+    approval = db_session.get(Approval, result.approval_id)
+    assert approval is not None
+    assert approval.status == ApprovalStatus.PENDING

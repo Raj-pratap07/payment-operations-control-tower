@@ -194,7 +194,6 @@ def test_no_provider_mode_does_not_break_deterministic_investigation(db_session:
     result = InvestigationService().investigate(db_session, incident.id)
 
     assert result.incident_id == incident.id
-    assert result.confidence == 0
     assert result.evidence
 
 
@@ -203,7 +202,7 @@ def test_invalid_ai_output_is_rejected(db_session: Session) -> None:
     provider = FinalProvider({"incident_id": str(incident.id)})
 
     with pytest.raises(InvalidInvestigationOutputError):
-        InvestigationService(provider).investigate(db_session, incident.id)
+        InvestigationService(provider, use_fallback=False).investigate(db_session, incident.id)
 
 
 def test_untrusted_evidence_id_is_rejected(db_session: Session) -> None:
@@ -211,7 +210,7 @@ def test_untrusted_evidence_id_is_rejected(db_session: Session) -> None:
     provider = FinalProvider(valid_output(incident.id, str(uuid4())))
 
     with pytest.raises(InvalidInvestigationOutputError, match="unsupported evidence"):
-        InvestigationService(provider).investigate(db_session, incident.id)
+        InvestigationService(provider, use_fallback=False).investigate(db_session, incident.id)
 
 
 def test_tool_call_limit_returns_structured_uncertainty(db_session: Session) -> None:
@@ -232,8 +231,14 @@ def test_tool_failure_returns_structured_uncertainty(db_session: Session) -> Non
 
     provider = FailingToolProvider()
     result = InvestigationService(provider).investigate(db_session, incident.id)
+    # A tool failure is routed to the evidence-backed fallback (which itself
+    # is conservative here, since the evidence references no retrievable
+    # Settlement record), producing structured uncertainties rather than a
+    # crash or a fabricated investigation.
     assert result.root_cause == "Undetermined"
-    assert any("tool failed" in item for item in result.uncertainties)
+    assert result.incident_id == incident.id
+    assert result.uncertainties
+    assert any("[fallback]" in item for item in result.uncertainties)
 
 
 def test_investigation_schema_rejects_extra_fields() -> None:

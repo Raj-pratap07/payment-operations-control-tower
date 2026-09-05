@@ -50,12 +50,22 @@ class ActionExecutor:
         self._verifier = verifier or VerificationService()
         self._audit = audit or AuditService(self._repository)
 
-    def execute(self, db: Session, proposal_id: UUID) -> ExecutionResult:
+    def execute(self, db: Session, proposal_id: UUID, *, verify: bool = True) -> ExecutionResult:
+        """Execute an authorized proposal.
+
+        ``verify=True`` (the default) runs verification immediately after
+        execution, preserving the existing single-call contract. API callers
+        pass ``verify=False`` to keep the EXECUTED-but-unverified state so a
+        later explicit verification step can run.
+        """
         execution_id = f"action-proposal:{proposal_id}"
         existing = self._repository.get_execution(db, execution_id)
         if existing is not None:
-            verification = self._verifier.verify_execution(db, execution_id)
-            return ExecutionResult(existing.status == "EXECUTED" and verification.passed, existing, verification, "Existing execution returned.")
+            verification = self._verifier.verify_execution(db, execution_id) if verify else None
+            return ExecutionResult(
+                existing.status == "EXECUTED" and (verification is None or verification.passed),
+                existing, verification, "Existing execution returned.",
+            )
 
         proposal = self._repository.get_proposal(db, proposal_id)
         if proposal is None:
@@ -98,7 +108,7 @@ class ActionExecutor:
             self._persist_audit(db, "EXECUTION_STARTED", proposal, reason="Controlled internal execution started.")
             before_state = {"incident_status": incident.status.value}
             try:
-                adapter_result = self._adapter.execute(proposal, incident)
+                adapter_result = self._adapter.execute(db, proposal, incident)
             except Exception as error:
                 proposal.status = ActionProposalStatus.FAILED
                 execution = ActionExecution(
@@ -119,10 +129,13 @@ class ActionExecutor:
             proposal.status = ActionProposalStatus.EXECUTED
             db.flush()
             self._persist_audit(db, "EXECUTION_COMPLETED", proposal, reason="Controlled internal execution completed.")
-            verification = self._verifier.verify_execution(db, execution_id)
-            if not verification.passed:
+            verification = self._verifier.verify_execution(db, execution_id) if verify else None
+            if verification is not None and not verification.passed:
                 return ExecutionResult(False, execution, verification, verification.reason)
-        return ExecutionResult(True, execution, verification, verification.reason)
+        return ExecutionResult(
+            True, execution, verification,
+            verification.reason if verification is not None else "Controlled internal execution completed.",
+        )
 
     def _verify_existing(self, db: Session, execution: ActionExecution) -> VerificationResult:
         proposal = self._repository.get_proposal(db, execution.action_proposal_id)

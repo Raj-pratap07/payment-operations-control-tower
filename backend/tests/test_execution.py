@@ -133,7 +133,7 @@ def test_duplicate_execution_returns_existing_result(db_session: Session) -> Non
 
 
 class FailingAdapter:
-    def execute(self, proposal: ActionProposal, incident: Incident) -> AdapterResult:
+    def execute(self, db: Session, proposal: ActionProposal, incident: Incident) -> AdapterResult:
         raise AdapterExecutionError("controlled adapter failed")
 
 
@@ -150,7 +150,7 @@ def test_execution_failure_is_recorded_without_resolution(db_session: Session) -
 
 
 class MissingStateAdapter:
-    def execute(self, proposal: ActionProposal, incident: Incident) -> AdapterResult:
+    def execute(self, db: Session, proposal: ActionProposal, incident: Incident) -> AdapterResult:
         return AdapterResult(provider_reference=None, after_state={"action_type": proposal.action_type})
 
 
@@ -224,7 +224,7 @@ def test_invalid_lifecycle_guard_does_not_mutate_financial_state(db_session: Ses
 def test_in_process_adapter_has_no_live_provider_capability(db_session: Session) -> None:
     incident, proposal = setup_proposal(db_session)
 
-    result = InProcessActionAdapter().execute(proposal, incident)
+    result = InProcessActionAdapter().execute(db_session, proposal, incident)
 
     assert result.provider_reference is None
     assert result.after_state["review_required"] is True

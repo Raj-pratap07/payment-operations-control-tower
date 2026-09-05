@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = Field(default="gemini-3.6-flash")
     OPENROUTER_API_KEY: str = Field(default="")
     OPENROUTER_MODEL: str = Field(default="openai/gpt-oss-120b:free")
+    INVESTIGATION_FALLBACK: bool = Field(default=True)
 
 
 @lru_cache

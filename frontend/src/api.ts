@@ -14,6 +14,8 @@ export interface Investigation { incident_id: string; root_cause: string; summar
 export interface PolicyDecision { outcome: string; reason: string; policy_id: string | null; evaluated_conditions: Record<string, unknown> }
 export interface Approval { id: string; requested_by: string; approved_by: string | null; status: string; reason: string | null; requested_at: string; approved_at: string | null }
 export interface Execution { id: string; execution_id: string; status: string; provider_reference: string | null; error: string | null; executed_at: string | null; verified_at: string | null }
+export interface VerificationResult { outcome: string; passed: boolean; reason: string }
+export interface ExecutionCommandResult { success: boolean; reason: string; execution: Execution | null; verification: VerificationResult | null; action: Action | null }
 export interface Action { id: string; incident_id: string; action_type: string; description: string; amount: number | null; currency: string | null; confidence: number | null; requires_approval: boolean; status: string; created_by: string; created_at: string; updated_at: string; policy_decision: PolicyDecision | null; approvals: Approval[]; executions: Execution[] }
 export interface AuditEvent { id: string; actor_type: string; actor_id: string | null; action_type: string; entity_type: string; entity_id: string | null; reason: string | null; evidence: Record<string, unknown> | null; metadata: Record<string, unknown> | null; created_at: string }
 export interface Dashboard { payment_health: Record<string, number>; open_incident_count: number; critical_incident_count: number; financial_exposure: number; unexplained_money: number; auto_approved_action_count: number; auto_approvable_action_count: number; approval_required_action_count: number; recent_critical_incidents: IncidentSummary[] }
@@ -40,5 +42,7 @@ export const api = {
   action: (id: string) => request<Action>(`/actions/${id}`),
   approve: (id: string, actor_id: string) => request<Approval>(`/actions/${id}/approve`, { method: 'POST', body: JSON.stringify({ actor_id }) }),
   reject: (id: string, actor_id: string, reason: string) => request<Approval>(`/actions/${id}/reject`, { method: 'POST', body: JSON.stringify({ actor_id, reason }) }),
+  execute: (id: string) => request<ExecutionCommandResult>(`/actions/${id}/execute`, { method: 'POST' }),
+  verify: (id: string) => request<ExecutionCommandResult>(`/actions/${id}/verify`, { method: 'POST' }),
   audit: (entityType: string, entityId: string) => request<AuditEvent[]>(`/audit/${entityType}/${entityId}`),
 }

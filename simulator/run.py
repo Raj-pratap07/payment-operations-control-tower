@@ -6,6 +6,7 @@ import argparse
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -47,6 +48,7 @@ from app.services.webhook_ingestion import WebhookIngestionService  # noqa: E402
 
 SCENARIOS = ("clean_payment", "payment_state_conflict", "settlement_discrepancy", "refund_drift", "settlement_credit_delay")
 DEMO_PREFIX = "DEMO:"
+DEMO_SETTLEMENT_EXPOSURE = 2_800_000
 PRIMARY_EXPECTED = 50_000_000
 PRIMARY_OBSERVED = 47_200_000
 PRIMARY_DIFFERENCE = PRIMARY_EXPECTED - PRIMARY_OBSERVED
@@ -135,6 +137,7 @@ def settlement_discrepancy(db: Session, run_id: str) -> ScenarioResult:
     settlement = _settlement(db, run_id, at + timedelta(days=1), PRIMARY_OBSERVED, "DEMO-DISCREPANCY")
     bank = BankTransaction(external_transaction_id=f"{DEMO_PREFIX}bank:{run_id}", transaction_type="CREDIT", amount=PRIMARY_OBSERVED, currency="INR", utr=settlement.utr, transaction_at=at + timedelta(days=1, hours=2), source="DEMO_SIMULATOR")
     db.add(bank)
+    seed_demo_policies(db)
     incident = IncidentDetectionService().detect_settlement_discrepancy(db, settlement, detected_at=at + timedelta(days=1, hours=3), expected_amount=PRIMARY_EXPECTED)
     db.commit()
     return ScenarioResult("settlement_discrepancy", run_id, payment.id, settlement.id, bank.id, incident.id if incident else None)
@@ -200,6 +203,27 @@ def reset_demo(db: Session) -> None:
         db.execute(delete(FinancialEvent).where(FinancialEvent.id.in_(event_ids)))
     db.execute(delete(Policy).where(Policy.name.like(f"{DEMO_PREFIX}%")))
     db.commit()
+
+
+def seed_demo_policies(db: Session) -> None:
+    """Create demo policies that ensure RECONCILE_ADJUSTMENT evaluates to REQUIRE_APPROVAL.
+
+    Idempotent: checks for existing active policy before inserting.
+    Caller is responsible for committing.
+    """
+    existing = db.scalar(select(Policy).where(Policy.action_type == "RECONCILE_ADJUSTMENT", Policy.is_active == True))  # noqa: E712
+    if existing is not None:
+        return
+    db.add(Policy(
+        name=f"{DEMO_PREFIX}RECONCILE_ADJUSTMENT",
+        description=f"{DEMO_PREFIX} Deterministic demo policy for settlement reconciliation proposals.",
+        action_type="RECONCILE_ADJUSTMENT",
+        max_amount=10_000,
+        min_confidence=Decimal("0.90"),
+        requires_approval=True,
+        is_active=True,
+    ))
+    db.flush()
 
 
 def summary(db: Session, result: ScenarioResult) -> None:

@@ -9,8 +9,10 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.agents.fallback import EvidenceBackedFallbackProvider
 from app.agents.provider import LLMProvider, ProviderResponse, configured_provider
 from app.agents.prompts import INVESTIGATOR_SYSTEM_PROMPT
+from app.core.config import settings
 from app.schemas.investigation import InvestigationEvidence, InvestigationOutput
 from app.services.investigation_tools import InvestigationToolLayer, ToolError
 
@@ -30,12 +32,15 @@ class InvestigationService:
         *,
         max_tool_calls: int = 8,
         tools_factory: type[InvestigationToolLayer] = InvestigationToolLayer,
+        use_fallback: bool | None = None,
     ) -> None:
         if max_tool_calls < 0:
             raise ValueError("max_tool_calls must be non-negative.")
         self._provider = provider or configured_provider()
         self._max_tool_calls = max_tool_calls
         self._tools_factory = tools_factory
+        self._use_fallback = use_fallback if use_fallback is not None else settings.INVESTIGATION_FALLBACK
+        self._fallback = EvidenceBackedFallbackProvider()
 
     def investigate(self, db: Session, incident_id: UUID) -> InvestigationOutput:
         tools = self._tools_factory(db)
@@ -59,6 +64,13 @@ class InvestigationService:
                     tools=sorted(InvestigationToolLayer.TOOL_NAMES),
                 )
             except Exception as error:
+                if self._use_fallback:
+                    return self._fallback.construct(
+                        incident=incident_result,
+                        evidence_records=evidence_result,
+                        incident_id=incident_id,
+                        fetched_records=_prefetch_entity_records(tools, evidence_result),
+                    )
                 return self._incomplete(incident_id, f"Investigation provider failed: {error}", known_ids)
             last_response = response
             if not response.tool_calls:
@@ -69,25 +81,52 @@ class InvestigationService:
                 try:
                     result = tools.execute(call.name, call.arguments)
                 except (ToolError, TypeError, ValueError) as error:
+                    if self._use_fallback:
+                        return self._fallback.construct(
+                            incident=incident_result,
+                            evidence_records=evidence_result,
+                            incident_id=incident_id,
+                            fetched_records=_prefetch_entity_records(tools, evidence_result),
+                        )
                     return self._incomplete(incident_id, f"Investigation tool failed: {error}", known_ids)
                 known_ids |= _record_ids(result)
                 messages.append({"role": "tool", "name": call.name, "call_id": call.call_id, "content": result})
                 calls_used += 1
         if last_response is None or last_response.content is None:
             return self._incomplete(incident_id, "No structured investigation response was produced.", known_ids)
-        return self._validate_output(last_response.content, incident_id, known_ids)
+        try:
+            return self._validate_output(last_response.content, incident_id, evidence_result)
+        except (InvalidInvestigationOutputError, ValidationError) as error:
+            if self._use_fallback:
+                return self._fallback.construct(
+                    incident=incident_result,
+                    evidence_records=evidence_result,
+                    incident_id=incident_id,
+                    fetched_records=_prefetch_entity_records(tools, evidence_result),
+                )
+            raise
 
     @staticmethod
-    def _validate_output(content: Any, incident_id: UUID, known_ids: set[str]) -> InvestigationOutput:
+    def _validate_output(content: Any, incident_id: UUID, evidence_result: Any) -> InvestigationOutput:
         try:
             output = InvestigationOutput.model_validate(content)
         except ValidationError as error:
             raise InvalidInvestigationOutputError("Investigator returned malformed structured output.") from error
         if output.incident_id != incident_id:
             raise InvalidInvestigationOutputError("Investigator output references a different incident.")
-        unknown = [item.entity_id for item in output.evidence if item.entity_id not in known_ids]
-        if unknown:
-            raise InvalidInvestigationOutputError(f"Investigator returned unsupported evidence IDs: {unknown}.")
+        requested_keys = {(item.entity_type, item.entity_id, item.relationship) for item in output.evidence}
+        if not requested_keys:
+            raise InvalidInvestigationOutputError("Investigator returned no evidence for the incident.")
+        valid_keys = _evidence_tuples(evidence_result)
+        unknown = [
+            item.entity_id
+            for item in output.evidence
+            if (item.entity_type, item.entity_id, item.relationship) not in valid_keys
+        ]
+        if not requested_keys.issubset(valid_keys):
+            raise InvalidInvestigationOutputError(
+                f"Investigator returned unsupported evidence: {unknown or 'none'}."
+            )
         return output
 
     @staticmethod
@@ -122,3 +161,58 @@ def _record_ids(value: Any) -> set[str]:
         for item in value:
             ids |= _record_ids(item)
     return ids
+
+
+def _evidence_tuples(value: Any) -> set[tuple[str, str, str]]:
+    """Return the exact (entity_type, entity_id, relationship) tuples of the
+    incident's ``IncidentEvidence`` rows, matching the Action Planner contract.
+
+    ``value`` is the ``get_incident_evidence`` tool result, either the raw
+    wrapper ``{"tool": ..., "result": [...]}`` or the unwrapped list.
+    """
+    items = value.get("result") if isinstance(value, dict) and isinstance(value.get("result"), list) else value
+    if not isinstance(items, list):
+        return set()
+    return {
+        (item.get("entity_type"), item.get("entity_id"), item.get("relationship"))
+        for item in items
+        if item.get("entity_id")
+    }
+
+
+def _prefetch_entity_records(
+    tools: InvestigationToolLayer,
+    evidence_result: Any,
+) -> list[dict[str, Any]]:
+    """Pre-fetch actual Settlement / BankTransaction records for evidence entity IDs.
+
+    The incident-evidence rows contain entity_type and entity_id but not
+    the financial fields (amount, currency, etc.) the fallback needs.
+    This helper fetches the actual domain records so the fallback can
+    derive financial values deterministically.
+    """
+    records: list[dict[str, Any]] = []
+    if isinstance(evidence_result, dict) and "result" in evidence_result:
+        evidence_items = evidence_result["result"] if isinstance(evidence_result["result"], list) else []
+    elif isinstance(evidence_result, list):
+        evidence_items = evidence_result
+    else:
+        evidence_items = []
+    for item in evidence_items:
+        entity_type = item.get("entity_type", "")
+        entity_id_str = item.get("entity_id", "")
+        if not entity_id_str:
+            continue
+        try:
+            from uuid import UUID as _UUID
+            entity_uuid = _UUID(entity_id_str)
+        except (ValueError, TypeError):
+            continue
+        try:
+            if entity_type == "Settlement":
+                records.append(tools.get_settlement(settlement_id=entity_uuid))
+            elif entity_type == "BankTransaction":
+                records.append(tools.get_bank_transaction(transaction_id=entity_uuid))
+        except ToolError:
+            continue
+    return records

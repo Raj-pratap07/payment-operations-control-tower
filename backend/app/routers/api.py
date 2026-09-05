@@ -11,11 +11,14 @@ from app.models import ActionProposal, Incident
 from app.policies.engine import PolicyEngine
 from app.repositories.action_policy import ActionPolicyRepository
 from app.repositories.api import APIRepository
+from app.repositories.execution import ExecutionRepository
 from app.repositories.incidents import ControlStateRepository
 from app.repositories.projections import PaymentRepository
-from app.schemas.api import ActionProposalResponse, ActionResponse, ActorRequest, ApprovalResponse, CreateActionProposalRequest, DashboardSummary, EvidenceResponse, IncidentResponse, IncidentSummary, InvestigationResponse, PaymentJourneyResponse, PaymentResponse, PaymentTransitionResponse, RejectionRequest
+from app.schemas.api import ActionProposalResponse, ActionResponse, ActorRequest, ApprovalResponse, CreateActionProposalRequest, DashboardSummary, EvidenceResponse, ExecutionActionResult, ExecutionResponse, IncidentResponse, IncidentSummary, InvestigationResponse, PaymentJourneyResponse, PaymentResponse, PaymentTransitionResponse, PolicyDecisionResponse, RejectionRequest, VerificationResultResponse
 from app.services.action_planning import ApprovalService
+from app.services.executor import ActionExecutor
 from app.services.investigator import InvestigationService
+from app.services.verification import VerificationService
 
 
 router = APIRouter()
@@ -190,6 +193,46 @@ def approve_action(action_id: UUID, request: ActorRequest, db: Session = Depends
 @router.post("/actions/{action_id}/reject", response_model=ApprovalResponse)
 def reject_action(action_id: UUID, request: RejectionRequest, db: Session = Depends(get_db)) -> ApprovalResponse:
     return _approval_action(db, action_id, request, reject=True, reason=request.reason)
+
+
+@router.post("/actions/{action_id}/execute", response_model=ExecutionActionResult)
+def execute_action(action_id: UUID, db: Session = Depends(get_db)) -> ExecutionActionResult:
+    if api_repository.action(db, action_id) is None:
+        raise _not_found("Action proposal was not found.")
+    result = ActionExecutor().execute(db, action_id, verify=False)
+    if result.execution is None and not result.success:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result.reason)
+    action = api_repository.action(db, action_id)
+    response = ExecutionActionResult(
+        success=result.success,
+        reason=result.reason,
+        execution=ExecutionResponse.model_validate(result.execution) if result.execution is not None else None,
+        verification=VerificationResultResponse.model_validate(result.verification) if result.verification is not None else None,
+        action=_action_response(db, action) if action is not None else None,
+    )
+    db.commit()
+    return response
+
+
+@router.post("/actions/{action_id}/verify", response_model=ExecutionActionResult)
+def verify_action(action_id: UUID, db: Session = Depends(get_db)) -> ExecutionActionResult:
+    if api_repository.action(db, action_id) is None:
+        raise _not_found("Action proposal was not found.")
+    execution = ExecutionRepository().get_execution(db, f"action-proposal:{action_id}")
+    if execution is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The action has not been executed yet; verify cannot run before execution.")
+    verification = VerificationService().verify_execution(db, execution.execution_id)
+    action = api_repository.action(db, action_id)
+    response = ExecutionActionResult(
+        success=verification.passed,
+        reason=verification.reason,
+        execution=ExecutionResponse.model_validate(execution),
+        verification=VerificationResultResponse.model_validate(verification),
+        action=_action_response(db, action) if action is not None else None,
+    )
+    db.commit()
+    return response
 
 
 @router.get("/audit/{entity_type}/{entity_id}", response_model=list[dict[str, object]])
